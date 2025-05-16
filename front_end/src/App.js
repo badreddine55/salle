@@ -14,6 +14,8 @@ const EditSalle = lazy(() => import("./component/superadmin/EditSalle"));
 const ProfileSettings = lazy(() => import("./component/superadmin/ProfileSettings"));
 const ScheduleHistory = lazy(() => import("./component/superadmin/ScheduleHistory"));
 const ScheduleView = lazy(() => import("./component/superadmin/ScheduleView"));
+const FilterPage = lazy(() => import("./component/superadmin/FilterPage"));
+const NotFound = lazy(() => import("./component/NotFound"));
 
 export default function App() {
   return React.createElement(
@@ -59,7 +61,8 @@ export default function App() {
         null,
         // Public Routes
         React.createElement(Route, { path: "/", element: React.createElement(Login) }),
-        // Protected Routes
+
+        // Protected Routes for Superadmin
         React.createElement(
           Route,
           {
@@ -129,7 +132,17 @@ export default function App() {
             path: "/schedule/view/:historyId",
             element: React.createElement(ProtectedRoute, { allowedRoles: ["Superadmin"] }, React.createElement(ScheduleView)),
           }
-        )
+        ),
+        React.createElement(
+          Route,
+          {
+            path: "/FilterPage",
+            element: React.createElement(ProtectedRoute, { allowedRoles: ["Superadmin"] }, React.createElement(FilterPage)),
+          }
+        ),
+
+        // Fallback Route for 404
+        React.createElement(Route, { path: "*", element: React.createElement(NotFound) })
       )
     )
   );

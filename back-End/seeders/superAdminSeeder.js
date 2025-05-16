@@ -25,7 +25,7 @@ async function seedSuperadmin() {
     const superadmin = await Superadmin.create(superadminData);
 
     // Create corresponding auth record
-    const hashedPassword = await bcrypt.hash('SecurePassword123!', 10);
+    const hashedPassword = await bcrypt.hash('SecurePassword123!', 2);
     await Auth.create({
       email: superadminData.email,
       password: hashedPassword,

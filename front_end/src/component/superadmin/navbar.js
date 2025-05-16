@@ -61,6 +61,13 @@ export default function Navbar() {
                 >
                   Historique
                 </Link>,
+                <Link
+                  key="FilterPage"
+                  to="/FilterPage"
+                  className="inline-flex items-center px-1 pt-1 border-b-2 border-transparent text-sm font-medium text-gray-500 hover:text-[#004AAD] hover:border-[#004AAD]"
+                >
+                  Filtrer
+                </Link>,
               ]}
             </div>
           </div>
@@ -142,6 +149,14 @@ export default function Navbar() {
                   onClick={() => setIsOpen(false)}
                 >
                   Historique
+                </Link>,
+                <Link
+                  key="FilterPage"
+                  to="/FilterPage"
+                  className="block pl-3 pr-4 py-2 border-l-4 border-transparent text-base font-medium text-gray-600 hover:text-[#004AAD] hover:bg-gray-50 hover:border-[#004AAD]"
+                  onClick={() => setIsOpen(false)}
+                >
+                  Filtrer
                 </Link>,
               ]}
               {role === "Formateur" && [

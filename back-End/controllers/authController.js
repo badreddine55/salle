@@ -12,19 +12,35 @@ const findPersonById = async (id) => {
 };
 
 const login = async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password } = req.body
+
+  console.log('📥 Données reçues :', { email, password });
 
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required' });
   }
 
   try {
-    const auth = await Auth.findOne({ email }).select('+password').populate('id_person');
-    if (!auth || !auth.id_person) {
+    const auth = await Auth.findOne({ email })
+      .select('+password')
+      .populate('id_person');
+
+    if (!auth) {
+      console.log('❌ Aucun utilisateur trouvé pour cet email.');
       return res.status(400).json({ message: 'Invalid credentials' });
     }
 
+    // 🔐 Afficher le hash du password récupéré depuis la base
+    console.log('🔐 Hash du mot de passe récupéré en base :', auth.password);
+    const cryptedPassword = await bcrypt.hash('SecurePassword123!', 2);
+    console.log ('le code secert c est ',process.env.JWT_SECRET);
+    console.log('🔐 crypted recive password^^^^^^^^^^^^^^^^', cryptedPassword);
+    // Comparer avec le mot de passe envoyé
     const isMatch = await bcrypt.compare(password, auth.password);
+
+    console.log('🔑 Mot de passe saisi :', password);
+    console.log('✅ Résultat de la comparaison :', isMatch);
+
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid credentials' });
     }
@@ -32,12 +48,21 @@ const login = async (req, res) => {
     const token = generateToken(auth.id_person._id);
     const role = auth.id_person.role;
 
+    console.log('🛡️ Token JWT généré :', token);
+    console.log('🎭 Rôle utilisateur :', role);
+    console.log ('le code secert c est ',process.env.JWT_SECRET);
+    // 📖 Décryptage (vérification + lecture du contenu du token)
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log('📖 Contenu décrypté du token :', decoded);
+
     res.json({ token, role });
+
   } catch (error) {
-    console.error('Error during login:', error);
+    console.error('🔥 Erreur lors de la connexion :', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+
 
 const forgetPassword = async (req, res) => {
   const { email } = req.body;
