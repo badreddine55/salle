@@ -1,0 +1,13 @@
+{"formateurName":"Badr Eddine","level":"error","message":"Invalid phone number format","phoneNumber":"0701708363","timestamp":"2025-05-21T21:11:04.882Z"}
+{"error":"Request failed with status code 404","formateurName":"Badr Eddine","id":"682e3bc6e3ba364b18600e99","level":"error","message":"Error fetching PDF","timestamp":"2025-05-21T21:11:58.144Z"}
+{"error":"Request failed with status code 404","formateurName":"Badr Eddine","id":"682e3bc6e3ba364b18600e99","level":"error","message":"Error fetching PDF","timestamp":"2025-05-21T21:27:12.356Z"}
+{"error":"Request failed with status code 404","formateurName":"Badr Eddine","id":"682e3bc6e3ba364b18600e99","level":"error","message":"Error fetching PDF","timestamp":"2025-05-21T21:27:21.904Z"}
+{"level":"info","message":"Sending WhatsApp message for ID: 682ddfd04f7d0bafda2c31d8","timestamp":"2025-05-22T13:24:36.198Z"}
+{"formateurName":"yasserrr","id":"682ddfd04f7d0bafda2c31d8","level":"info","message":"Updated phone number with country code","phoneNumber":"+212622401017","timestamp":"2025-05-22T13:24:36.244Z"}
+{"apiUrl":"http://localhost:5000","level":"info","message":"API URL for requests","timestamp":"2025-05-22T13:24:36.263Z"}
+{"filename":"formateur-schedule-682ddfd04f7d0bafda2c31d8.pdf","level":"info","message":"FormData prepared","size":2175,"timestamp":"2025-05-22T13:24:36.458Z"}
+{"formateurName":"yasserrr","id":"682ddfd04f7d0bafda2c31d8","level":"info","message":"PDF uploaded successfully","pdfUrl":"http://localhost:5000/Uploads/formateur-schedule-682ddfd04f7d0bafda2c31d8_1747920276479.pdf","timestamp":"2025-05-22T13:24:36.491Z"}
+{"level":"info","message":"PDF URL is accessible","pdfUrl":"http://localhost:5000/Uploads/formateur-schedule-682ddfd04f7d0bafda2c31d8_1747920276479.pdf","timestamp":"2025-05-22T13:24:36.505Z"}
+{"level":"info","message":"WhatsApp Phone Number ID","timestamp":"2025-05-22T13:24:36.506Z","whatsappPhoneNumberId":"Loaded"}
+{"level":"info","message":"WhatsApp Token","timestamp":"2025-05-22T13:24:36.507Z","whatsappToken":"Not loaded"}
+{"level":"error","message":"WhatsApp token not configured","timestamp":"2025-05-22T13:24:36.507Z"}
