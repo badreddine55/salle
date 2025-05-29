@@ -21,10 +21,12 @@ export default function ImportData() {
   const [pendingFilieres, setPendingFilieres] = useState([]);
   const [etablissements, setEtablissements] = useState([]);
   const [selectedEtablissement, setSelectedEtablissement] = useState("");
+  const [processingSummary, setProcessingSummary] = useState(null);
 
   // Normalize column names for flexibility
   const normalizeColumnName = (header) => {
-    const normalized = header.toLowerCase().trim();
+    if (!header) return header;
+    const normalized = header.toLowerCase().trim().replace(/[\s_]+/g, '');
     if (normalized.includes("filiere") || normalized.includes("filière")) return "filière";
     if (normalized.includes("niveau")) return "Niveau";
     if (normalized.includes("année") || normalized.includes("annee")) return "Année de formation";
@@ -56,6 +58,7 @@ export default function ImportData() {
     setPostStatus(null);
     setPendingFilieres([]);
     setSelectedEtablissement("");
+    setProcessingSummary(null);
 
     let xlsxLib = XLSX;
     if (!xlsxLib) {
@@ -100,6 +103,21 @@ export default function ImportData() {
           return rowData;
         });
 
+        // Validate row count and unique filieres
+        if (processedData.length < 33) {
+          console.warn(`Excel file contains ${processedData.length} rows, expected at least 33.`);
+          setError(`Fichier Excel contient ${processedData.length} lignes, attendu au moins 33.`);
+          setLoading(false);
+          return;
+        }
+        const uniqueFilieres = new Set(processedData.map(row => row["filière"]?.trim()).filter(name => name && name !== "N/A"));
+        if (uniqueFilieres.size < 33) {
+          console.warn(`Excel file contains ${uniqueFilieres.size} unique filières, expected 33.`);
+          setError(`Fichier Excel contient ${uniqueFilieres.size} filières uniques, attendu 33.`);
+          setLoading(false);
+          return;
+        }
+
         // Clean and validate data
         const cleanedData = processAndCleanData(processedData, headers);
         setData(cleanedData);
@@ -117,18 +135,26 @@ export default function ImportData() {
           },
         });
         const etabs = etabResponse.data.data || [];
+        console.log("Etablissements:", etabs);
         if (etabs.length === 0) {
-          throw new Error("Aucun établissement trouvé dans la base de données. Veuillez ajouter des établissements.");
+          console.warn("No establishments found. All filières will be pending.");
         }
         setEtablissements(etabs);
 
         // Process filieres
         const { validFilieres, pending, rejected } = processFilieres(cleanedData, etabs);
+        console.log("Processing results:", { validFilieres, pending, rejected });
+        setProcessingSummary({ validFilieres, pending, rejected });
+
         if (validFilieres.length > 0) {
           await postFilieres(validFilieres);
         }
         if (pending.length > 0) {
           setPendingFilieres(pending);
+          if (etabs.length > 0) {
+            setSelectedEtablissement(etabs[0]._id);
+            await handleSubmitPendingFilieres();
+          }
         }
         if (validFilieres.length === 0 && pending.length === 0) {
           let errorMessage = "Aucune filière valide à envoyer.";
@@ -143,6 +169,7 @@ export default function ImportData() {
         setError(err.message);
         setData([]);
         setPendingFilieres([]);
+        setProcessingSummary(null);
         setLoading(false);
       }
     };
@@ -150,6 +177,7 @@ export default function ImportData() {
       setError("Erreur lors de la lecture du fichier");
       setData([]);
       setPendingFilieres([]);
+      setProcessingSummary(null);
       setLoading(false);
     };
     reader.readAsArrayBuffer(file);
@@ -157,49 +185,46 @@ export default function ImportData() {
 
   // Process and clean the data
   const processAndCleanData = (rawData, headers) => {
-    return rawData
-      .filter((row) => Object.values(row).some((val) => val !== "" && val !== "N/A"))
-      .map((row) => {
-        const cleanedRow = {};
-        headers.forEach((header) => {
-          let value = row[header] || "";
-          if (value === "" || value === null || value === undefined) {
-            cleanedRow[header] = "N/A";
-          } else if (header === "Effectif Groupe") {
-            const numValue = parseInt(value);
-            cleanedRow[header] = isNaN(numValue) ? "0" : numValue.toString();
-          } else {
-            cleanedRow[header] = value;
-          }
-        });
-        return cleanedRow;
+    return rawData.map((row) => {
+      const cleanedRow = {};
+      headers.forEach((header) => {
+        let value = row[header] || "";
+        if (value === "" || value === null || value === undefined) {
+          cleanedRow[header] = "N/A";
+        } else if (header === "Effectif Groupe") {
+          const numValue = parseInt(value);
+          cleanedRow[header] = isNaN(numValue) ? "0" : numValue.toString();
+        } else {
+          cleanedRow[header] = value;
+        }
       });
+      return cleanedRow;
+    });
   };
 
   // Process filieres and separate valid from pending
   const processFilieres = (data, etablissements) => {
-    const filieresMap = new Map();
+    const filieresList = [];
     const rejected = [];
+    const defaultEtablissement = etablissements[0]?._id;
 
     data.forEach((row, index) => {
       const filiereName = row["filière"]?.trim();
       if (!filiereName || filiereName === "N/A") {
         console.warn(`Row ${index + 2}: Skipping row: Invalid filière name - ${filiereName || "empty"}`);
-        rejected.push({ name: filiereName || "unknown", reason: "Nom de filière invalide ou vide" });
+        rejected.push({ name: filiereName || "unknown", reason: "Nom de filière invalide ou vide", row: index + 2, rawModule: row["Module"] });
         return;
       }
 
-      if (!filieresMap.has(filiereName)) {
-        filieresMap.set(filiereName, {
-          name: filiereName,
-          groups: new Map(),
-          modules: new Map(),
-          etablissement: null,
-          originalEtablissement: row["Etablissement"] || "N/A",
-        });
-      }
-
-      const filiere = filieresMap.get(filiereName);
+      const filiere = {
+        name: filiereName,
+        groups: [],
+        modules: [],
+        etablissement: null,
+        originalEtablissement: row["Etablissement"] || "N/A",
+        row: index + 2,
+        rawModule: row["Module"],
+      };
 
       // Add group
       let groupNames = [];
@@ -211,36 +236,42 @@ export default function ImportData() {
       }
 
       if (groupNames.length === 0) {
-        // Add default group to ensure filière is not rejected
         const defaultGroup = `Groupe-${filiereName}-${index + 2}`;
         groupNames = [defaultGroup];
         console.warn(`Row ${index + 2}: No valid groups for filière ${filiereName}, using default group: ${defaultGroup}`);
       }
 
       groupNames.forEach((groupName) => {
-        if (!filiere.groups.has(groupName)) {
-          filiere.groups.set(groupName, {
-            name: groupName,
-            effectif: parseInt(row["Effectif Groupe"]) || 0,
-          });
-        }
+        filiere.groups.push({
+          name: groupName,
+          effectif: parseInt(row["Effectif Groupe"]) || 0,
+        });
       });
 
-      // Add module
+      // Add modules
       let moduleNames = [];
       if (row["Module"] && row["Module"] !== "N/A") {
-        moduleNames = row["Module"].split(',').map(m => m.trim()).filter(m => m);
+        console.log(`Row ${index + 2}: Raw Module value for ${filiereName}: "${row["Module"]}"`);
+        // Split by semicolon only to preserve module names with commas
+        moduleNames = row["Module"]
+          .split(';')
+          .map(m => m.trim())
+          .filter(m => m && m !== "N/A");
       }
 
       const moduleMode = row["Mode"]?.trim() || "N/A";
+      if (moduleNames.length === 0) {
+        moduleNames = [`Module-${filiereName}-${index + 2}`];
+        console.warn(`Row ${index + 2}: No valid modules for filière ${filiereName}, using default module: ${moduleNames[0]}`);
+      } else {
+        console.log(`Row ${index + 2}: Parsed modules for filière ${filiereName}: ${moduleNames.join(' | ')}`);
+      }
+
       moduleNames.forEach((moduleName) => {
-        const moduleKey = `${moduleName}-${moduleMode}`;
-        if (moduleName && !filiere.modules.has(moduleKey)) {
-          filiere.modules.set(moduleKey, {
-            name: moduleName,
-            mode: moduleMode,
-          });
-        }
+        filiere.modules.push({
+          name: moduleName,
+          mode: moduleMode,
+        });
       });
 
       // Map Etablissement
@@ -250,27 +281,30 @@ export default function ImportData() {
           filiere.etablissement = etab._id;
         }
       }
+      if (!filiere.etablissement && defaultEtablissement) {
+        filiere.etablissement = defaultEtablissement;
+        console.log(`Row ${index + 2}: Assigned default establishment ${defaultEtablissement} for filière ${filiereName}`);
+      }
+
+      filieresList.push(filiere);
     });
 
     const validFilieres = [];
     const pending = [];
-    filieresMap.forEach((filiere) => {
-      if (!filiere.name) {
-        console.warn(`Skipping filière ${filiere.name || "unknown"}: Invalid name`);
-        rejected.push({ name: filiere.name || "unknown", reason: "Nom de filière invalide" });
-        return;
-      }
+    filieresList.forEach((filiere) => {
       const filiereData = {
         name: filiere.name,
-        groups: Array.from(filiere.groups.values()),
-        modules: Array.from(filiere.modules.values()),
+        groups: filiere.groups,
+        modules: filiere.modules,
         etablissement: filiere.etablissement,
+        row: filiere.row,
+        rawModule: filiere.rawModule,
       };
       if (filiere.etablissement) {
         validFilieres.push(filiereData);
       } else {
         pending.push({ ...filiereData, originalEtablissement: filiere.originalEtablissement });
-        console.log(`Filière ${filiere.name} added to pending: Etablissement ${filiere.originalEtablissement} not found`);
+        console.log(`Row ${filiere.row}: Filière ${filiere.name} added to pending: Etablissement ${filiere.originalEtablissement} not found`);
       }
     });
 
@@ -313,7 +347,7 @@ export default function ImportData() {
 
     for (const filiere of filieres) {
       try {
-        console.log("Posting filière:", filiere);
+        console.log(`Posting filière: ${filiere.name} with modules: ${filiere.modules.map(m => m.name).join(' | ')}`);
         const response = await axios.post(`${apiUrl}/api/filieres`, filiere, {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -322,13 +356,39 @@ export default function ImportData() {
           },
         });
         if (response.data.message && response.data.message.includes("existe déjà")) {
-          skippedFilieres.push(filiere.name);
+          // Try updating instead
+          try {
+            await axios.put(`${apiUrl}/api/filieres/${encodeURIComponent(filiere.name)}`, filiere, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                role: localStorage.getItem("role") || "superadmin",
+                "Content-Type": "application/json",
+              },
+            });
+            successfulFilieres.push(filiere.name);
+          } catch (updateErr) {
+            skippedFilieres.push(filiere.name);
+            console.warn(`Failed to update filière ${filiere.name}: ${updateErr.message}`);
+          }
         } else {
           successfulFilieres.push(filiere.name);
         }
       } catch (err) {
         if (err.response?.data?.message?.includes("existe déjà")) {
-          skippedFilieres.push(filiere.name);
+          // Try updating
+          try {
+            await axios.put(`${apiUrl}/api/filieres/${encodeURIComponent(filiere.name)}`, filiere, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                role: localStorage.getItem("role") || "superadmin",
+                "Content-Type": "application/json",
+              },
+            });
+            successfulFilieres.push(filiere.name);
+          } catch (updateErr) {
+            skippedFilieres.push(filiere.name);
+            console.warn(`Failed to update filière ${filiere.name}: ${updateErr.message}`);
+          }
         } else {
           const errorMessage = err.response?.data?.message || err.message;
           console.error(`Erreur pour la filière ${filiere.name}: ${errorMessage}`);
@@ -345,7 +405,10 @@ export default function ImportData() {
       message += `Filières déjà existantes, ignorées : ${skippedFilieres.join(', ')}. `;
     }
     if (failedFilieres.length > 0) {
-      message += `Filières non importées : ${failedFilieres.map(f => `${f.name} (${f.reason})`).join(', ')}.`;
+      message += `Filières non importées : ${failedFilieres.map(f => `${f.name} (${f.reason})`).join(', ')}. `;
+    }
+    if (pendingFilieres.length > 0) {
+      message += `Filières en attente : ${pendingFilieres.map(f => f.name).join(', ')}. `;
     }
     if (!message) {
       message = "Aucune filière importée.";
@@ -358,6 +421,45 @@ export default function ImportData() {
     setData([]);
     setPendingFilieres([]);
     setSelectedEtablissement("");
+  };
+
+  // Download summary as CSV
+  const downloadSummary = () => {
+    if (!processingSummary) return;
+    const rows = [
+      ['Filière', 'Ligne', 'Modules', 'Raw Module', 'Statut', 'Raison'],
+      ...processingSummary.validFilieres.map(f => [
+        f.name,
+        f.row || '-',
+        f.modules.map(m => m.name).join(';'),
+        f.rawModule || 'N/A',
+        'Valide',
+        '-'
+      ]),
+      ...processingSummary.pending.map(f => [
+        f.name,
+        f.row,
+        f.modules.map(m => m.name).join(';'),
+        f.rawModule || 'N/A',
+        'En attente',
+        `Établissement: ${f.originalEtablissement}`
+      ]),
+      ...processingSummary.rejected.map(f => [
+        f.name,
+        f.row,
+        'N/A',
+        f.rawModule || 'N/A',
+        'Rejeté',
+        f.reason
+      ]),
+    ];
+    const csv = rows.map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.setAttribute('href', url);
+    a.setAttribute('download', 'import_summary.csv');
+    a.click();
   };
 
   return (
@@ -394,6 +496,63 @@ export default function ImportData() {
             {postStatus.message}
           </div>
         )}
+        {processingSummary && (
+          <div className="mb-6 bg-white p-6 rounded-lg shadow-sm">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-medium text-gray-900">Résumé du traitement</h2>
+              <button
+                onClick={downloadSummary}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-[#004AAD] hover:bg-[#003a8c]"
+              >
+                Télécharger le résumé (CSV)
+              </button>
+            </div>
+            <table className="min-w-full bg-white">
+              <thead>
+                <tr>
+                  <th className="py-2 text-left">Filière</th>
+                  <th className="py-2 text-left">Ligne</th>
+                  <th className="py-2 text-left">Modules</th>
+                  <th className="py-2 text-left">Raw Module</th>
+                  <th className="py-2 text-left">Statut</th>
+                  <th className="py-2 text-left">Raison</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processingSummary.validFilieres.map((f, idx) => (
+                  <tr key={`valid-${idx}`}>
+                    <td className="py-2">{f.name}</td>
+                    <td className="py-2">{f.row || '-'}</td>
+                    <td className="py-2">{f.modules.map(m => m.name).join('; ') || 'Aucun'}</td>
+                    <td className="py-2">{f.rawModule || 'N/A'}</td>
+                    <td className="py-2">Valide</td>
+                    <td className="py-2">-</td>
+                  </tr>
+                ))}
+                {processingSummary.pending.map((f, idx) => (
+                  <tr key={`pending-${idx}`}>
+                    <td className="py-2">{f.name}</td>
+                    <td className="py-2">{f.row}</td>
+                    <td className="py-2">{f.modules.map(m => m.name).join('; ') || 'Aucun'}</td>
+                    <td className="py-2">{f.rawModule || 'N/A'}</td>
+                    <td className="py-2">En attente</td>
+                    <td className="py-2">Établissement: {f.originalEtablissement}</td>
+                  </tr>
+                ))}
+                {processingSummary.rejected.map((f, idx) => (
+                  <tr key={`rejected-${idx}`}>
+                    <td className="py-2">{f.name}</td>
+                    <td className="py-2">{f.row}</td>
+                    <td className="py-2">N/A</td>
+                    <td className="py-2">{f.rawModule || 'N/A'}</td>
+                    <td className="py-2">Rejeté</td>
+                    <td className="py-2">{f.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         {pendingFilieres.length > 0 && (
           <div className="mb-6 bg-white p-6 rounded-lg shadow-sm">
             <h2 className="text-lg font-medium text-gray-900 mb-4">
@@ -404,7 +563,7 @@ export default function ImportData() {
               <ul className="list-disc list-inside text-sm text-gray-600 mt-2">
                 {pendingFilieres.map((filiere) => (
                   <li key={filiere.name}>
-                    {filiere.name} (Établissement dans Excel : {filiere.originalEtablissement})
+                    {filiere.name} (Ligne: {filiere.row}, Modules: {filiere.modules.map(m => m.name).join('; ') || 'Aucun'}, Raw Module: {filiere.rawModule || 'N/A'}, Établissement: {filiere.originalEtablissement})
                   </li>
                 ))}
               </ul>

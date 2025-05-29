@@ -15,7 +15,7 @@ const createFiliere = asyncHandler(async (req, res) => {
   }
   if (!mongoose.Types.ObjectId.isValid(etablissement)) {
     res.status(400);
-    throw new Error('Identifiant d\'établissement invalide');
+    throw new Error("Identifiant d'établissement invalide");
   }
 
   // Validate groups
@@ -39,10 +39,10 @@ const createFiliere = asyncHandler(async (req, res) => {
 
   // Validate group names for uniqueness
   if (groups && groups.length > 0) {
-    const groupNames = groups.map(g => g.name);
+    const groupNames = groups.map((g) => g.name);
     const existingGroups = await Groupe.find({ name: { $in: groupNames } });
     if (existingGroups.length > 0) {
-      const duplicateNames = existingGroups.map(g => g.name);
+      const duplicateNames = existingGroups.map((g) => g.name);
       res.status(400);
       throw new Error(`Les groupes suivants existent déjà : ${duplicateNames.join(', ')}`);
     }
@@ -58,16 +58,17 @@ const createFiliere = asyncHandler(async (req, res) => {
 
   // Bulk create groups
   if (groups && groups.length > 0) {
-    const groupDocs = groups.map(group => ({
+    const groupDocs = groups.map((group) => ({
       name: group.name,
       filiere: filiere._id,
+      effectif: 0,
     }));
     await Groupe.insertMany(groupDocs);
   }
 
   // Bulk create modules
   if (modules && modules.length > 0) {
-    const moduleDocs = modules.map(module => ({
+    const moduleDocs = modules.map((module) => ({
       name: module.name,
       filiere: filiere._id,
     }));
@@ -113,7 +114,7 @@ const updateFiliere = asyncHandler(async (req, res) => {
   }
   if (!mongoose.Types.ObjectId.isValid(etablissement)) {
     res.status(400);
-    throw new Error('Identifiant d\'établissement invalide');
+    throw new Error("Identifiant d'établissement invalide");
   }
 
   // Find existing filiere
@@ -132,15 +133,18 @@ const updateFiliere = asyncHandler(async (req, res) => {
 
   // Validate group names for uniqueness in other filieres
   if (groups && groups.length > 0) {
-    const groupNames = groups.map(g => g.name);
+    const groupNames = groups.map((g) => g.name);
     const existingGroups = await Groupe.find({
       name: { $in: groupNames },
       filiere: { $ne: filiere._id },
     });
     if (existingGroups.length > 0) {
-      const duplicateNames = existingGroups.map(g => g.name);
+      const duplicateNames = existingGroups.map((g) => g.name);
+      const conflictingFiliere = await Filiere.findById(existingGroups[0].filiere).select('name');
       res.status(400);
-      throw new Error(`Les groupes suivants existent déjà dans une autre filière : ${duplicateNames.join(', ')}`);
+      throw new Error(
+        `Les groupes suivants existent déjà dans la filière "${conflictingFiliere.name}": ${duplicateNames.join(', ')}`
+      );
     }
   }
 
@@ -153,7 +157,7 @@ const updateFiliere = asyncHandler(async (req, res) => {
 
   // Sync groups
   const existingGroups = await Groupe.find({ filiere: filiere._id });
-  const currentGroupNames = groups ? groups.map(g => g.name) : [];
+  const currentGroupNames = groups ? groups.map((g) => g.name) : [];
 
   // Delete removed groups
   await Groupe.deleteMany({
@@ -163,10 +167,10 @@ const updateFiliere = asyncHandler(async (req, res) => {
 
   // Bulk upsert groups
   if (groups && groups.length > 0) {
-    const groupDocs = groups.map(group => ({
+    const groupDocs = groups.map((group) => ({
       updateOne: {
         filter: { filiere: filiere._id, name: group.name },
-        update: { $set: { name: group.name } },
+        update: { $set: { name: group.name, effectif: 0 } },
         upsert: true,
       },
     }));
@@ -175,7 +179,7 @@ const updateFiliere = asyncHandler(async (req, res) => {
 
   // Sync modules
   const existingModules = await Module.find({ filiere: filiere._id });
-  const currentModuleNames = modules ? modules.map(m => m.name) : [];
+  const currentModuleNames = modules ? modules.map((m) => m.name) : [];
 
   // Delete removed modules
   await Module.deleteMany({
@@ -185,7 +189,7 @@ const updateFiliere = asyncHandler(async (req, res) => {
 
   // Bulk upsert modules
   if (modules && modules.length > 0) {
-    const moduleDocs = modules.map(module => ({
+    const moduleDocs = modules.map((module) => ({
       updateOne: {
         filter: { filiere: filiere._id, name: module.name },
         update: { $set: { name: module.name } },

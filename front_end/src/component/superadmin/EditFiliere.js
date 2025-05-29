@@ -18,6 +18,7 @@ export default function EditFiliere() {
   const [newModule, setNewModule] = useState("");
   const [etablissements, setEtablissements] = useState([]);
   const [error, setError] = useState("");
+  const [groupError, setGroupError] = useState(""); // New state for group-specific errors
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
@@ -37,7 +38,7 @@ export default function EditFiliere() {
       }
 
       try {
-        const apiUrl = process.env.REACT_APP_API_URL ;
+        const apiUrl = process.env.REACT_APP_API_URL;
         // Fetch filiere
         const filiereResponse = await axios.get(`${apiUrl}/api/filieres/${id}`, {
           headers: {
@@ -46,7 +47,6 @@ export default function EditFiliere() {
           },
         });
         const filiereData = filiereResponse.data.data;
-        console.log("Filiere response:", filiereData); // Debug
 
         // Ensure groups and modules are arrays of objects
         const groups = Array.isArray(filiereData.groups)
@@ -95,6 +95,27 @@ export default function EditFiliere() {
     fetchData();
   }, [id, navigate]);
 
+  // Validate group name in real-time
+  const validateGroupName = async (groupName) => {
+    if (!groupName.trim()) return;
+    try {
+      const token = localStorage.getItem("token");
+      const apiUrl = process.env.REACT_APP_API_URL;
+      const response = await axios.get(`${apiUrl}/api/groupes?name=${encodeURIComponent(groupName)}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          role: localStorage.getItem("role") || "superadmin",
+        },
+      });
+      const groups = response.data.data || [];
+      const isDuplicate = groups.some((g) => g.name === groupName && g.filiere.toString() !== id);
+      setGroupError(isDuplicate ? `Le groupe "${groupName}" existe déjà dans une autre filière.` : "");
+    } catch (err) {
+      setGroupError("Erreur lors de la vérification du nom du groupe.");
+      console.error("Erreur de validation du groupe :", err);
+    }
+  };
+
   // Handle form changes
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -103,17 +124,25 @@ export default function EditFiliere() {
 
   // Handle new group input
   const handleGroupChange = (e) => {
-    setNewGroup(e.target.value);
+    const value = e.target.value;
+    setNewGroup(value);
+    validateGroupName(value); // Validate in real-time
   };
 
   // Add group to list
   const handleAddGroup = () => {
-    if (newGroup.trim() && !formData.groups.some((g) => g.name === newGroup.trim())) {
+    if (!newGroup.trim()) {
+      setGroupError("Le nom du groupe est requis.");
+      return;
+    }
+    if (groupError) return; // Prevent adding if there's an error
+    if (!formData.groups.some((g) => g.name === newGroup.trim())) {
       setFormData((prev) => ({
         ...prev,
         groups: [...prev.groups, { name: newGroup.trim() }],
       }));
       setNewGroup("");
+      setGroupError("");
     }
   };
 
@@ -176,34 +205,7 @@ export default function EditFiliere() {
     }
 
     try {
-      const apiUrl = process.env.REACT_APP_API_URL ;
-      console.log("Updating at:", `${apiUrl}/api/filieres/${id}`, formData);
-
-      // Fetch existing groups for this filiere
-      const existingGroupsResponse = await axios.get(`${apiUrl}/api/groupes?filiere=${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          role: localStorage.getItem("role") || "superadmin",
-        },
-      });
-      const existingGroups = existingGroupsResponse.data.data || [];
-
-      // Check for duplicate groups in other filieres
-      const allGroupsResponse = await axios.get(`${apiUrl}/api/groupes`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          role: localStorage.getItem("role") || "superadmin",
-        },
-      });
-      const allGroups = allGroupsResponse.data.data || [];
-      const duplicateGroups = formData.groups.filter((group) =>
-        allGroups.some((g) => g.name === group.name && g.filiere.toString() !== id)
-      );
-      if (duplicateGroups.length > 0) {
-        setError(`Les groupes suivants existent déjà dans une autre filière : ${duplicateGroups.map(g => g.name).join(", ")}`);
-        setIsSubmitting(false);
-        return;
-      }
+      const apiUrl = process.env.REACT_APP_API_URL;
 
       // Update filiere
       await axios.put(`${apiUrl}/api/filieres/${id}`, formData, {
@@ -215,10 +217,16 @@ export default function EditFiliere() {
       });
 
       // Sync groups in Groupe collection
-      const currentGroupNames = formData.groups.map(g => g.name);
-      const existingGroupNames = existingGroups.map(g => g.name);
+      const existingGroupsResponse = await axios.get(`${apiUrl}/api/groupes?filiere=${id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          role: localStorage.getItem("role") || "superadmin",
+        },
+      });
+      const existingGroups = existingGroupsResponse.data.data || [];
+      const currentGroupNames = formData.groups.map((g) => g.name);
 
-      // Delete groups that were removed
+      // Delete removed groups
       for (const existingGroup of existingGroups) {
         if (!currentGroupNames.includes(existingGroup.name)) {
           await axios.delete(`${apiUrl}/api/groupes/${existingGroup._id}`, {
@@ -232,7 +240,7 @@ export default function EditFiliere() {
 
       // Add new groups
       for (const group of formData.groups) {
-        if (!existingGroupNames.includes(group.name)) {
+        if (!existingGroups.some((g) => g.name === group.name)) {
           await axios.post(
             `${apiUrl}/api/groupes`,
             { name: group.name, filiere: id, effectif: 0 },
@@ -257,6 +265,8 @@ export default function EditFiliere() {
         navigate("/");
       } else if (err.response?.status === 400 && errorMessage.includes("filière avec ce nom existe")) {
         setError("Une filière avec ce nom existe déjà. Veuillez choisir un autre nom.");
+      } else if (err.response?.status === 400 && errorMessage.includes("groupe")) {
+        setError(errorMessage); // Display backend group error
       } else {
         setError(`Échec de la mise à jour de la filière : ${errorMessage}`);
       }
@@ -362,18 +372,25 @@ export default function EditFiliere() {
                   type="text"
                   value={newGroup}
                   onChange={handleGroupChange}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-[#004AAD] focus:border-[#004AAD] focus:outline-none"
+                  className={`w-full px-4 py-2 border ${groupError ? "border-red-300" : "border-gray-300"} rounded-lg focus:ring-[#004AAD] focus:border-[#004AAD] focus:outline-none`}
                   placeholder="Ex: Groupe A"
                   maxLength={50}
                 />
                 <button
                   type="button"
                   onClick={handleAddGroup}
-                  className="ml-2 p-2 bg-[#004AAD] text-white rounded-lg hover:bg-[#222222]"
+                  disabled={groupError || !newGroup.trim()}
+                  className={`ml-2 p-2 ${groupError || !newGroup.trim() ? "bg-gray-300 cursor-not-allowed" : "bg-[#004AAD] hover:bg-[#222222]"} text-white rounded-lg`}
                 >
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
+              {groupError && (
+                <div className="mt-1 text-red-600 text-sm flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {groupError}
+                </div>
+              )}
               {formData.groups.length > 0 && (
                 <ul className="mt-2 space-y-2">
                   {formData.groups.map((group, index) => (
@@ -430,7 +447,7 @@ export default function EditFiliere() {
                 </ul>
               )}
             </div>
-            {/* Error */}
+            {/* General Error */}
             {error && (
               <div className="p-3 bg-red-50 border border-red-200 text-red-600 rounded-lg text-sm flex items-center">
                 <AlertCircle className="h-4 w-4 mr-2" />
@@ -440,8 +457,10 @@ export default function EditFiliere() {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full bg-[#004AAD] text-white py-3 rounded-lg hover:bg-[#222222] transition-all flex justify-center items-center"
+              disabled={isSubmitting || groupError}
+              className={`w-full py-3 rounded-lg transition-all flex justify-center items-center ${
+                isSubmitting || groupError ? "bg-gray-300 cursor-not-allowed" : "bg-[#004AAD] hover:bg-[#222222] text-white"
+              }`}
             >
               {isSubmitting ? (
                 <>
